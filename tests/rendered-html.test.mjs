@@ -64,6 +64,8 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   assert.match(page, /const TIME_BUCKET_SIZE = 250;/);
   assert.match(page, /const placeScore = correctCountry\s*\?\s*5000/);
   assert.match(page, /Math\.exp\(-distanceKm \/ 10000\)/);
+  assert.match(page, /distanceToFeatureBorderKm/);
+  assert.match(page, /km to border/);
   assert.match(page, /step=\{TIME_BUCKET_SIZE\}/);
   assert.match(page, /additionalImages/);
   assert.match(page, /className="image-viewer"/);

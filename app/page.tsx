@@ -10,6 +10,7 @@ import { geoContains } from "d3-geo";
 import { feature } from "topojson-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import countriesAtlas from "world-atlas/countries-110m.json";
+import { distanceToFeatureBorderKm } from "@/lib/geography.mjs";
 
 type Place = {
   label: string;
@@ -657,10 +658,14 @@ function answerBucketsForArtifact(artifact: Artifact): number[] {
   return buckets;
 }
 
-function countryAtPoint(lon: number, lat: number): string | null {
-  const match = COUNTRY_FEATURES.features.find((country) =>
+function countryFeatureAtPoint(lon: number, lat: number) {
+  return COUNTRY_FEATURES.features.find((country) =>
     geoContains(country as Feature, [lon, lat]),
   );
+}
+
+function countryAtPoint(lon: number, lat: number): string | null {
+  const match = countryFeatureAtPoint(lon, lat);
   return match?.properties?.name || null;
 }
 
@@ -686,12 +691,21 @@ function haversineDistance(a: Guess, b: Place): number {
 }
 
 function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
-  const distanceKm = haversineDistance(guess, artifact.place);
-  const guessCountry = countryAtPoint(guess.lon, guess.lat);
-  const answerCountry = countryAtPoint(artifact.place.lon, artifact.place.lat);
-  const correctCountry = Boolean(
-    guessCountry && answerCountry && guessCountry === answerCountry,
+  const guessCountryFeature = countryFeatureAtPoint(guess.lon, guess.lat);
+  const answerCountryFeature = countryFeatureAtPoint(
+    artifact.place.lon,
+    artifact.place.lat,
   );
+  const guessCountry = guessCountryFeature?.properties?.name || null;
+  const answerCountry = answerCountryFeature?.properties?.name || null;
+  const correctCountry = Boolean(
+    answerCountryFeature &&
+      geoContains(answerCountryFeature as Feature, [guess.lon, guess.lat]),
+  );
+  const borderDistanceKm = answerCountryFeature
+    ? distanceToFeatureBorderKm([guess.lon, guess.lat], answerCountryFeature)
+    : haversineDistance(guess, artifact.place);
+  const distanceKm = correctCountry ? 0 : borderDistanceKm;
   const bucketGap = Math.min(
     ...answerBucketsForArtifact(artifact).map(
       (answerBucket) =>
@@ -1346,7 +1360,7 @@ function ResultPanel({
           <strong>
             {result.correctCountry
               ? `Correct country · ${result.answerCountry}`
-              : `${formatNumber(result.distanceKm)} km`}
+              : `${formatNumber(result.distanceKm)} km to border`}
           </strong>
           <b>+{formatNumber(result.placeScore)}</b>
         </div>
