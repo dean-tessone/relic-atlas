@@ -10,7 +10,10 @@ import { geoContains } from "d3-geo";
 import { feature } from "topojson-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import countriesAtlas from "world-atlas/countries-110m.json";
-import { distanceToFeatureBorderKm } from "@/lib/geography.mjs";
+import {
+  distanceToFeatureBorderKm,
+  featureRegionContainingPoint,
+} from "@/lib/geography.mjs";
 import { locationScore, timeScore } from "@/lib/scoring.mjs";
 
 type Place = {
@@ -340,6 +343,10 @@ const PLACE_RULES: Array<{ terms: string[]; place: Place }> = [
   {
     terms: ["canada", "canadian"],
     place: { label: "Canada", lat: 56.13, lon: -106.35 },
+  },
+  {
+    terms: ["french guiana", "guyane"],
+    place: { label: "French Guiana", lat: 4.92, lon: -52.31 },
   },
   {
     terms: ["france", "french", "gaul"],
@@ -741,12 +748,18 @@ function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
   );
   const guessCountry = guessCountryFeature?.properties?.name || null;
   const answerCountry = answerCountryFeature?.properties?.name || null;
+  const answerCountryRegion = answerCountryFeature
+    ? featureRegionContainingPoint(
+        [artifact.place.lon, artifact.place.lat],
+        answerCountryFeature,
+      )
+    : null;
   const correctCountry = Boolean(
-    answerCountryFeature &&
-      geoContains(answerCountryFeature as Feature, [guess.lon, guess.lat]),
+    answerCountryRegion &&
+      geoContains(answerCountryRegion as Feature, [guess.lon, guess.lat]),
   );
-  const borderDistanceKm = answerCountryFeature
-    ? distanceToFeatureBorderKm([guess.lon, guess.lat], answerCountryFeature)
+  const borderDistanceKm = answerCountryRegion
+    ? distanceToFeatureBorderKm([guess.lon, guess.lat], answerCountryRegion)
     : haversineDistance(guess, artifact.place);
   const distanceKm = correctCountry ? 0 : borderDistanceKm;
   const bucketGap = Math.min(
