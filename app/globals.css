@@ -985,6 +985,10 @@ a {
   background: #d9e1dd;
 }
 
+.world-map img.leaflet-tile {
+  max-width: none !important;
+}
+
 .world-map--revealed {
   cursor: grab;
 }

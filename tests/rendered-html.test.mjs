@@ -74,6 +74,9 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   assert.match(page, /const \[hasInteracted, setHasInteracted\]/);
   assert.match(page, /map\.on\("zoomstart dragstart"/);
   assert.match(page, /!hasInteracted && !guess && !revealed/);
+  assert.match(page, /zoomSnap:\s*1/);
+  assert.match(page, /map\.invalidateSize\(\{ animate: false, pan: false \}\)/);
+  assert.match(page, /map\.fitBounds\(revealBounds,\s*\{[\s\S]*animate: false/);
   assert.doesNotMatch(styles, /cursor:\s*zoom-in/);
   assert.match(
     styles,
@@ -81,4 +84,8 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   );
   assert.match(styles, /\.image-viewer\s*\{[^}]*z-index:\s*10000/s);
   assert.match(styles, /\.world-map-shell\s*\{[^}]*isolation:\s*isolate/s);
+  assert.match(
+    styles,
+    /\.world-map img\.leaflet-tile\s*\{[^}]*max-width:\s*none !important/s,
+  );
 });

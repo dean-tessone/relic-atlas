@@ -969,6 +969,11 @@ function WorldMap({
         });
 
       if (guess) {
+        const revealBounds = L.latLngBounds(
+          [guess.lat, guess.lon],
+          [answer.lat, answer.lon],
+        ).pad(0.42);
+
         answerLineRef.current = L.polyline(
           [
             [guess.lat, guess.lon],
@@ -981,13 +986,14 @@ function WorldMap({
             opacity: 0.75,
           },
         ).addTo(map);
-        map.fitBounds(
-          L.latLngBounds(
-            [guess.lat, guess.lon],
-            [answer.lat, answer.lon],
-          ).pad(0.42),
-          { animate: true, maxZoom: 5 },
-        );
+
+        map.stop();
+        map.invalidateSize({ animate: false, pan: false });
+        map.fitBounds(revealBounds, {
+          animate: false,
+          maxZoom: 5,
+          padding: [24, 24],
+        });
       }
     }
   }, [answer, guess, revealed]);
@@ -1003,7 +1009,8 @@ function WorldMap({
         zoom: 2,
         minZoom: 1.5,
         maxZoom: 8,
-        zoomSnap: 0.25,
+        zoomSnap: 1,
+        zoomDelta: 1,
         worldCopyJump: true,
         attributionControl: true,
       });
