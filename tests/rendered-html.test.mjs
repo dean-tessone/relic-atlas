@@ -56,6 +56,10 @@ test("keeps every expedition at ten rounds with repeat avoidance", async () => {
 
 test("uses country-aware placement, 250-year buckets, and image galleries", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
 
   assert.match(page, /const TIME_BUCKET_SIZE = 250;/);
   assert.match(page, /const placeScore = correctCountry\s*\?\s*5000/);
@@ -65,4 +69,9 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   assert.match(page, /className="image-viewer"/);
   assert.match(page, /className="world-map-shell"/);
   assert.match(page, /L\.geoJSON\(COUNTRY_FEATURES/);
+  assert.doesNotMatch(styles, /cursor:\s*zoom-in/);
+  assert.match(
+    styles,
+    /\.image-viewer-canvas img\s*\{[^}]*cursor:\s*default/s,
+  );
 });

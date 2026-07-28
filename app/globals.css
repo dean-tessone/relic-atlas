@@ -693,7 +693,7 @@ a {
   padding: 0;
   border: 0;
   background: #2f2d29;
-  cursor: zoom-in;
+  cursor: pointer;
 }
 
 .artifact-image-button img {
@@ -847,6 +847,7 @@ a {
   display: grid;
   place-items: center;
   overflow: auto;
+  cursor: default;
   background:
     linear-gradient(45deg, rgba(255, 255, 255, 0.025) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(255, 255, 255, 0.025) 25%, transparent 25%),
@@ -858,6 +859,7 @@ a {
   width: min(86vw, 1100px);
   height: min(76vh, 850px);
   object-fit: contain;
+  cursor: default;
   transform-origin: center;
   transition: transform 160ms ease;
 }
