@@ -11,6 +11,7 @@ import { feature } from "topojson-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import countriesAtlas from "world-atlas/countries-110m.json";
 import { distanceToFeatureBorderKm } from "@/lib/geography.mjs";
+import { locationScore, timeScore } from "@/lib/scoring.mjs";
 
 type Place = {
   label: string;
@@ -754,10 +755,8 @@ function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
         Math.abs(guess.bucketStart - answerBucket) / TIME_BUCKET_SIZE,
     ),
   );
-  const placeScore = correctCountry
-    ? 5000
-    : Math.round(5000 * Math.exp(-distanceKm / 10000));
-  const timeScore = Math.round(5000 * Math.exp(-bucketGap / 5.6));
+  const placeScore = locationScore(distanceKm, correctCountry);
+  const timePoints = timeScore(bucketGap);
   return {
     artifact,
     guess,
@@ -767,8 +766,8 @@ function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
     guessCountry,
     answerCountry,
     placeScore,
-    timeScore,
-    total: Math.min(MAX_ROUND_SCORE, placeScore + timeScore),
+    timeScore: timePoints,
+    total: Math.min(MAX_ROUND_SCORE, placeScore + timePoints),
   };
 }
 
