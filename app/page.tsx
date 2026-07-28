@@ -14,7 +14,11 @@ import {
   distanceToFeatureBorderKm,
   featureRegionContainingPoint,
 } from "@/lib/geography.mjs";
-import { locationScore, timeScore } from "@/lib/scoring.mjs";
+import {
+  locationScore,
+  timeScore,
+  yearErrorForRange,
+} from "@/lib/scoring.mjs";
 
 type Place = {
   label: string;
@@ -66,7 +70,7 @@ type RoundResult = {
   artifact: Artifact;
   guess: Guess;
   distanceKm: number;
-  bucketGap: number;
+  yearError: number;
   correctCountry: boolean;
   guessCountry: string | null;
   answerCountry: string | null;
@@ -762,19 +766,19 @@ function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
     ? distanceToFeatureBorderKm([guess.lon, guess.lat], answerCountryRegion)
     : haversineDistance(guess, artifact.place);
   const distanceKm = correctCountry ? 0 : borderDistanceKm;
-  const bucketGap = Math.min(
-    ...answerBucketsForArtifact(artifact).map(
-      (answerBucket) =>
-        Math.abs(guess.bucketStart - answerBucket) / TIME_BUCKET_SIZE,
-    ),
+  const yearError = yearErrorForRange(
+    guess.bucketStart,
+    artifact.beginYear,
+    artifact.endYear,
+    TIME_BUCKET_SIZE,
   );
-  const placeScore = locationScore(distanceKm, correctCountry);
-  const timePoints = timeScore(bucketGap);
+  const placeScore = locationScore(distanceKm);
+  const timePoints = timeScore(yearError);
   return {
     artifact,
     guess,
     distanceKm,
-    bucketGap,
+    yearError,
     correctCountry,
     guessCountry,
     answerCountry,
@@ -1430,9 +1434,9 @@ function ResultPanel({
         <div>
           <span>Time</span>
           <strong>
-            {result.bucketGap === 0
-              ? "Correct 250-year block"
-              : `${formatNumber(result.bucketGap)} ${result.bucketGap === 1 ? "block" : "blocks"} away`}
+            {result.yearError === 0
+              ? "Inside accepted range"
+              : `${formatNumber(result.yearError)} ${result.yearError === 1 ? "year" : "years"} from range`}
           </strong>
           <b>+{formatNumber(result.timeScore)}</b>
         </div>

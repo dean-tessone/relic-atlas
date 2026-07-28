@@ -20,7 +20,8 @@ minimize repeats on the same device.
 - Unlimited ten-relic expeditions
 - Randomized live object pool from The Met Collection API
 - Zoomable, country-bordered world map with country-aware scoring
-- Discrete 250-year historical scoring buckets
+- Canonical exponential scoring for border distance and the nearest year gap
+  from each 250-year guess to the artifact's accepted date range
 - No repeated country-and-period combinations within one expedition
 - Multi-image object galleries with a full-screen zoom viewer
 - Immediate object reveals and a final expedition ledger

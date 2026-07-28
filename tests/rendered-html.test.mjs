@@ -62,8 +62,9 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   );
 
   assert.match(page, /const TIME_BUCKET_SIZE = 250;/);
-  assert.match(page, /locationScore\(distanceKm, correctCountry\)/);
-  assert.match(page, /timeScore\(bucketGap\)/);
+  assert.match(page, /locationScore\(distanceKm\)/);
+  assert.match(page, /yearErrorForRange\(/);
+  assert.match(page, /timeScore\(yearError\)/);
   assert.match(page, /distanceToFeatureBorderKm/);
   assert.match(page, /featureRegionContainingPoint/);
   assert.match(page, /terms: \["french guiana", "guyane"\]/);
