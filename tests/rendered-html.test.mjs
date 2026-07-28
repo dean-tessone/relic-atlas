@@ -49,6 +49,8 @@ test("keeps every expedition at ten rounds with repeat avoidance", async () => {
   assert.match(page, /new Set\(ids\)/);
   assert.match(page, /usedCountryTimeSlots/);
   assert.match(page, /countryTimeSlotsForArtifact/);
+  assert.match(page, /const MAX_SELECTION_PASSES = 3;/);
+  assert.match(page, /secureShuffle\(found\.flat\(\)\)/);
   assert.match(page, /Play another 10/);
 });
 

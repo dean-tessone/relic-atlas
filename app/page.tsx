@@ -80,6 +80,7 @@ const MAX_ROUND_SCORE = 10_000;
 const TIME_MIN = -4000;
 const TIME_MAX = 2000;
 const TIME_BUCKET_SIZE = 250;
+const MAX_SELECTION_PASSES = 3;
 const COUNTRY_FEATURES = feature(
   countriesAtlas as never,
   countriesAtlas.objects.countries as never,
@@ -526,16 +527,22 @@ async function fetchArtifactForTerm(
   term: string,
   seen: Set<number>,
 ): Promise<Artifact[]> {
-  const searchResponse = await fetch(
-    `${MET_API}/search?hasImages=true&q=${encodeURIComponent(term)}`,
-  );
-  if (!searchResponse.ok) return [];
-  const search = (await searchResponse.json()) as {
-    objectIDs?: number[];
-  };
-  const candidates = secureShuffle(search.objectIDs || [])
-    .filter((id) => !seen.has(id))
-    .slice(0, 5);
+  let candidates: number[];
+
+  try {
+    const searchResponse = await fetch(
+      `${MET_API}/search?hasImages=true&q=${encodeURIComponent(term)}`,
+    );
+    if (!searchResponse.ok) return [];
+    const search = (await searchResponse.json()) as {
+      objectIDs?: number[];
+    };
+    candidates = secureShuffle(search.objectIDs || [])
+      .filter((id) => !seen.has(id))
+      .slice(0, 5);
+  } catch {
+    return [];
+  }
 
   const objects = await Promise.all(
     candidates.map(async (id) => {
@@ -560,33 +567,42 @@ async function loadExpedition(seen: Set<number>): Promise<Artifact[]> {
   const usedIds = new Set<number>();
   const usedTitles = new Set<string>();
   const usedCountryTimeSlots = new Set<string>();
-  const terms = secureShuffle(SEARCH_TERMS);
 
-  for (let offset = 0; offset < terms.length && artifacts.length < ROUND_COUNT; offset += 6) {
-    const batch = terms.slice(offset, offset + 6);
-    const found = await Promise.all(
-      batch.map((term) => fetchArtifactForTerm(term, seen)),
-    );
+  for (
+    let pass = 0;
+    pass < MAX_SELECTION_PASSES && artifacts.length < ROUND_COUNT;
+    pass += 1
+  ) {
+    const terms = secureShuffle(SEARCH_TERMS);
 
-    for (const candidates of found) {
-      const artifact = candidates.find((candidate) => {
-        const titleKey = candidate.title.toLocaleLowerCase();
-        const countryTimeSlots = countryTimeSlotsForArtifact(candidate);
-        return (
-          !usedIds.has(candidate.id) &&
-          !usedTitles.has(titleKey) &&
-          countryTimeSlots.every((slot) => !usedCountryTimeSlots.has(slot))
-        );
-      });
-      if (!artifact) continue;
-      const titleKey = artifact.title.toLocaleLowerCase();
-      const countryTimeSlots = countryTimeSlotsForArtifact(artifact);
-      usedIds.add(artifact.id);
-      usedTitles.add(titleKey);
-      countryTimeSlots.forEach((slot) => usedCountryTimeSlots.add(slot));
-      seen.add(artifact.id);
-      artifacts.push(artifact);
-      if (artifacts.length === ROUND_COUNT) break;
+    for (
+      let offset = 0;
+      offset < terms.length && artifacts.length < ROUND_COUNT;
+      offset += 6
+    ) {
+      const batch = terms.slice(offset, offset + 6);
+      const found = await Promise.all(
+        batch.map((term) => fetchArtifactForTerm(term, seen)),
+      );
+
+      for (const artifact of secureShuffle(found.flat())) {
+        const titleKey = artifact.title.toLocaleLowerCase();
+        const countryTimeSlots = countryTimeSlotsForArtifact(artifact);
+        if (
+          usedIds.has(artifact.id) ||
+          usedTitles.has(titleKey) ||
+          countryTimeSlots.some((slot) => usedCountryTimeSlots.has(slot))
+        ) {
+          continue;
+        }
+
+        usedIds.add(artifact.id);
+        usedTitles.add(titleKey);
+        countryTimeSlots.forEach((slot) => usedCountryTimeSlots.add(slot));
+        seen.add(artifact.id);
+        artifacts.push(artifact);
+        if (artifacts.length === ROUND_COUNT) break;
+      }
     }
   }
 
