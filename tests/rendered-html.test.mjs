@@ -68,6 +68,10 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   assert.match(page, /km to border/);
   assert.match(page, /step=\{TIME_BUCKET_SIZE\}/);
   assert.match(page, /additionalImages/);
+  assert.match(page, /const IMAGE_CACHE_LIMIT = 200;/);
+  assert.match(page, /precacheArtifactImages\(artifact, "high"\)/);
+  assert.match(page, /precacheArtifactImages\(artifacts\[round \+ 1\], "low"\)/);
+  assert.match(page, /fetchPriority="high"/);
   assert.match(page, /className="image-viewer"/);
   assert.match(page, /className="world-map-shell"/);
   assert.match(page, /World_Light_Gray_Base/);

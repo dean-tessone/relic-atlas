@@ -81,6 +81,11 @@ const TIME_MIN = -4000;
 const TIME_MAX = 2000;
 const TIME_BUCKET_SIZE = 250;
 const MAX_SELECTION_PASSES = 3;
+const IMAGE_CACHE_LIMIT = 200;
+const artifactImageCache = new Map<
+  string,
+  { image: HTMLImageElement; priority: "high" | "low" }
+>();
 const COUNTRY_FEATURES = feature(
   countriesAtlas as never,
   countriesAtlas.objects.countries as never,
@@ -436,6 +441,43 @@ const PLACE_RULES: Array<{ terms: string[]; place: Place }> = [
     place: { label: "New Zealand", lat: -40.9, lon: 174.89 },
   },
 ];
+
+function precacheImage(source: string, priority: "high" | "low") {
+  if (typeof Image === "undefined") return;
+
+  const cached = artifactImageCache.get(source);
+  if (cached) {
+    if (priority === "high" && cached.priority === "low") {
+      cached.image.fetchPriority = "high";
+      cached.priority = "high";
+    }
+    artifactImageCache.delete(source);
+    artifactImageCache.set(source, cached);
+    return;
+  }
+
+  const image = new Image();
+  image.decoding = "async";
+  image.fetchPriority = priority;
+  image.src = source;
+  void image.decode().catch(() => undefined);
+  artifactImageCache.set(source, { image, priority });
+
+  while (artifactImageCache.size > IMAGE_CACHE_LIMIT) {
+    const oldestSource = artifactImageCache.keys().next().value;
+    if (!oldestSource) break;
+    artifactImageCache.delete(oldestSource);
+  }
+}
+
+function precacheArtifactImages(
+  artifact: Artifact | undefined,
+  priority: "high" | "low",
+) {
+  artifact?.images.forEach((source, index) =>
+    precacheImage(source, index === 0 ? priority : "low"),
+  );
+}
 
 function secureShuffle<T>(values: readonly T[]): T[] {
   const result = [...values];
@@ -1195,6 +1237,10 @@ function ArtifactImagePanel({ artifact }: { artifact: Artifact }) {
   }, [artifact.id]);
 
   useEffect(() => {
+    precacheImage(artifact.images[imageIndex], "high");
+  }, [artifact.images, imageIndex]);
+
+  useEffect(() => {
     if (!viewerOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -1231,6 +1277,9 @@ function ArtifactImagePanel({ artifact }: { artifact: Artifact }) {
           <img
             src={artifact.images[imageIndex]}
             alt={`Mystery museum object${imageCount > 1 ? `, image ${imageIndex + 1} of ${imageCount}` : ""}`}
+            decoding="async"
+            fetchPriority="high"
+            loading="eager"
           />
         </button>
         <span className="image-tag">The Met · Open Access</span>
@@ -1308,6 +1357,8 @@ function ArtifactImagePanel({ artifact }: { artifact: Artifact }) {
             <img
               src={artifact.images[imageIndex]}
               alt="Expanded museum object"
+              decoding="async"
+              fetchPriority="high"
               style={{ transform: `scale(${zoom})` }}
             />
           </div>
@@ -1421,6 +1472,11 @@ function GameScreen({
     setPin(null);
     setBucketStart(500);
   }, [round]);
+
+  useEffect(() => {
+    precacheArtifactImages(artifact, "high");
+    precacheArtifactImages(artifacts[round + 1], "low");
+  }, [artifact, artifacts, round]);
 
   const guess = pin ? { ...pin, bucketStart } : null;
   const submit = () => {
