@@ -68,10 +68,17 @@ test("uses country-aware placement, 250-year buckets, and image galleries", asyn
   assert.match(page, /additionalImages/);
   assert.match(page, /className="image-viewer"/);
   assert.match(page, /className="world-map-shell"/);
-  assert.match(page, /L\.geoJSON\(COUNTRY_FEATURES/);
+  assert.match(page, /World_Light_Gray_Base/);
+  assert.match(page, /World_Light_Gray_Reference/);
+  assert.doesNotMatch(page, /L\.geoJSON\(COUNTRY_FEATURES/);
+  assert.match(page, /const \[hasInteracted, setHasInteracted\]/);
+  assert.match(page, /map\.on\("zoomstart dragstart"/);
+  assert.match(page, /!hasInteracted && !guess && !revealed/);
   assert.doesNotMatch(styles, /cursor:\s*zoom-in/);
   assert.match(
     styles,
     /\.image-viewer-canvas img\s*\{[^}]*cursor:\s*default/s,
   );
+  assert.match(styles, /\.image-viewer\s*\{[^}]*z-index:\s*10000/s);
+  assert.match(styles, /\.world-map-shell\s*\{[^}]*isolation:\s*isolate/s);
 });

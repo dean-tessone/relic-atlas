@@ -778,7 +778,7 @@ a {
 .image-viewer {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 10000;
   display: grid;
   grid-template-rows: auto 1fr auto;
   padding: 1rem;
@@ -969,6 +969,7 @@ a {
 
 .world-map-shell {
   position: relative;
+  isolation: isolate;
   width: 100%;
   aspect-ratio: 2 / 1;
   margin-top: 1.25rem;

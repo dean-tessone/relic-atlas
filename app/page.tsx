@@ -2,7 +2,6 @@
 
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type {
-  GeoJSON as LeafletGeoJSON,
   Map as LeafletMap,
   CircleMarker,
   Polyline,
@@ -906,18 +905,22 @@ function WorldMap({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<LeafletMap | null>(null);
-  const borderLayerRef = useRef<LeafletGeoJSON | null>(null);
   const guessMarkerRef = useRef<CircleMarker | null>(null);
   const answerMarkerRef = useRef<CircleMarker | null>(null);
   const answerLineRef = useRef<Polyline | null>(null);
   const revealedRef = useRef(revealed);
   const onGuessRef = useRef(onGuess);
   const [mapReady, setMapReady] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   useEffect(() => {
     revealedRef.current = revealed;
     onGuessRef.current = onGuess;
   }, [onGuess, revealed]);
+
+  useEffect(() => {
+    setHasInteracted(false);
+  }, [answer.lat, answer.lon]);
 
   const renderMapState = useCallback(async () => {
     const map = leafletMapRef.current;
@@ -1007,28 +1010,27 @@ function WorldMap({
       leafletMapRef.current = map;
 
       L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         {
-          maxZoom: 20,
-          subdomains: "abcd",
+          maxZoom: 16,
           attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            "Sources: Esri, HERE, Garmin, OpenStreetMap contributors, and the GIS user community",
         },
       ).addTo(map);
 
-      borderLayerRef.current = L.geoJSON(COUNTRY_FEATURES, {
-        interactive: false,
-        style: {
-          color: "#4c514c",
-          weight: 0.75,
-          opacity: 0.62,
-          fillOpacity: 0,
+      L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 16,
+          attribution: "English labels and political boundaries by Esri",
         },
-      }).addTo(map);
+      ).addTo(map);
 
+      map.on("zoomstart dragstart", () => setHasInteracted(true));
       map.on(
         "click",
         (event: { latlng: { lat: number; lng: number } }) => {
+          setHasInteracted(true);
           if (revealedRef.current) return;
           onGuessRef.current({
             lat: event.latlng.lat,
@@ -1043,7 +1045,6 @@ function WorldMap({
 
     return () => {
       active = false;
-      borderLayerRef.current = null;
       guessMarkerRef.current = null;
       answerMarkerRef.current = null;
       answerLineRef.current = null;
@@ -1065,7 +1066,7 @@ function WorldMap({
         role="application"
         aria-label="Zoomable world map with country borders. Click to place your guess."
       />
-      {!guess && !revealed && (
+      {!hasInteracted && !guess && !revealed && (
         <div className="map-instruction">
           <span>⌖</span> Click to place · scroll or pinch to zoom
         </div>
