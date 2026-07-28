@@ -525,17 +525,17 @@ function normalizeArtifact(object: MetObject): Artifact | null {
 async function fetchArtifactForTerm(
   term: string,
   seen: Set<number>,
-): Promise<Artifact | null> {
+): Promise<Artifact[]> {
   const searchResponse = await fetch(
     `${MET_API}/search?hasImages=true&q=${encodeURIComponent(term)}`,
   );
-  if (!searchResponse.ok) return null;
+  if (!searchResponse.ok) return [];
   const search = (await searchResponse.json()) as {
     objectIDs?: number[];
   };
   const candidates = secureShuffle(search.objectIDs || [])
     .filter((id) => !seen.has(id))
-    .slice(0, 7);
+    .slice(0, 5);
 
   const objects = await Promise.all(
     candidates.map(async (id) => {
@@ -548,13 +548,18 @@ async function fetchArtifactForTerm(
     }),
   );
 
-  return objects.map((object) => object && normalizeArtifact(object)).find(Boolean) || null;
+  return objects.reduce<Artifact[]>((playable, object) => {
+    const artifact = object ? normalizeArtifact(object) : null;
+    if (artifact) playable.push(artifact);
+    return playable;
+  }, []);
 }
 
 async function loadExpedition(seen: Set<number>): Promise<Artifact[]> {
   const artifacts: Artifact[] = [];
   const usedIds = new Set<number>();
   const usedTitles = new Set<string>();
+  const usedCountryTimeSlots = new Set<string>();
   const terms = secureShuffle(SEARCH_TERMS);
 
   for (let offset = 0; offset < terms.length && artifacts.length < ROUND_COUNT; offset += 6) {
@@ -563,12 +568,22 @@ async function loadExpedition(seen: Set<number>): Promise<Artifact[]> {
       batch.map((term) => fetchArtifactForTerm(term, seen)),
     );
 
-    for (const artifact of found) {
+    for (const candidates of found) {
+      const artifact = candidates.find((candidate) => {
+        const titleKey = candidate.title.toLocaleLowerCase();
+        const countryTimeSlots = countryTimeSlotsForArtifact(candidate);
+        return (
+          !usedIds.has(candidate.id) &&
+          !usedTitles.has(titleKey) &&
+          countryTimeSlots.every((slot) => !usedCountryTimeSlots.has(slot))
+        );
+      });
       if (!artifact) continue;
       const titleKey = artifact.title.toLocaleLowerCase();
-      if (usedIds.has(artifact.id) || usedTitles.has(titleKey)) continue;
+      const countryTimeSlots = countryTimeSlotsForArtifact(artifact);
       usedIds.add(artifact.id);
       usedTitles.add(titleKey);
+      countryTimeSlots.forEach((slot) => usedCountryTimeSlots.add(slot));
       seen.add(artifact.id);
       artifacts.push(artifact);
       if (artifacts.length === ROUND_COUNT) break;
@@ -632,6 +647,15 @@ function countryAtPoint(lon: number, lat: number): string | null {
     geoContains(country as Feature, [lon, lat]),
   );
   return match?.properties?.name || null;
+}
+
+function countryTimeSlotsForArtifact(artifact: Artifact): string[] {
+  const country =
+    countryAtPoint(artifact.place.lon, artifact.place.lat) ||
+    `region:${artifact.place.label}`;
+  return answerBucketsForArtifact(artifact).map(
+    (bucketStart) => `${country.toLocaleLowerCase()}|${bucketStart}`,
+  );
 }
 
 function haversineDistance(a: Guess, b: Place): number {

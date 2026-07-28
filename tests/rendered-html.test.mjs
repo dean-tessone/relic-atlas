@@ -47,6 +47,8 @@ test("keeps every expedition at ten rounds with repeat avoidance", async () => {
   assert.match(page, /MAX_ROUND_SCORE = 10_000/);
   assert.match(page, /relic-atlas-seen/);
   assert.match(page, /new Set\(ids\)/);
+  assert.match(page, /usedCountryTimeSlots/);
+  assert.match(page, /countryTimeSlotsForArtifact/);
   assert.match(page, /Play another 10/);
 });
 

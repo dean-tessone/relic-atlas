@@ -21,6 +21,7 @@ minimize repeats on the same device.
 - Randomized live object pool from The Met Collection API
 - Zoomable, country-bordered world map with country-aware scoring
 - Discrete 250-year historical scoring buckets
+- No repeated country-and-period combinations within one expedition
 - Multi-image object galleries with a full-screen zoom viewer
 - Immediate object reveals and a final expedition ledger
 - Device-local repeat avoidance and personal-best tracking
