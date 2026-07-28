@@ -19,7 +19,9 @@ minimize repeats on the same device.
 
 - Unlimited ten-relic expeditions
 - Randomized live object pool from The Met Collection API
-- Geographic and historical proximity scoring
+- Zoomable, country-bordered world map with country-aware scoring
+- Discrete 250-year historical scoring buckets
+- Multi-image object galleries with a full-screen zoom viewer
 - Immediate object reveals and a final expedition ledger
 - Device-local repeat avoidance and personal-best tracking
 - Responsive desktop and mobile layouts
@@ -49,10 +51,10 @@ product shell and metadata.
 
 Collection records and public-domain object images come from
 [The Met Open Access program](https://www.metmuseum.org/hubs/open-access) through
-[The Met Collection API](https://metmuseum.github.io/). The world map image is
-the freely reusable
-[Earthmap1000x500](https://commons.wikimedia.org/wiki/File:Earthmap1000x500.jpg)
-from Wikimedia Commons.
+[The Met Collection API](https://metmuseum.github.io/). Map tiles come from
+[OpenStreetMap](https://www.openstreetmap.org/copyright) and
+[CARTO](https://carto.com/attributions); country boundaries are derived from
+[Natural Earth](https://www.naturalearthdata.com/) through `world-atlas`.
 
 ## License
 

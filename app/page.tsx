@@ -1,6 +1,16 @@
 "use client";
 
+import type { Feature, FeatureCollection, Geometry } from "geojson";
+import type {
+  GeoJSON as LeafletGeoJSON,
+  Map as LeafletMap,
+  CircleMarker,
+  Polyline,
+} from "leaflet";
+import { geoContains } from "d3-geo";
+import { feature } from "topojson-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import countriesAtlas from "world-atlas/countries-110m.json";
 
 type Place = {
   label: string;
@@ -11,13 +21,12 @@ type Place = {
 type Artifact = {
   id: number;
   title: string;
-  image: string;
+  images: string[];
   objectName: string;
   medium: string;
   dateLabel: string;
   beginYear: number;
   endYear: number;
-  year: number;
   place: Place;
   culture: string;
   objectURL: string;
@@ -28,6 +37,7 @@ type MetObject = {
   title?: string;
   primaryImage?: string;
   primaryImageSmall?: string;
+  additionalImages?: string[];
   objectName?: string;
   medium?: string;
   objectDate?: string;
@@ -45,14 +55,17 @@ type MetObject = {
 type Guess = {
   lat: number;
   lon: number;
-  year: number;
+  bucketStart: number;
 };
 
 type RoundResult = {
   artifact: Artifact;
   guess: Guess;
   distanceKm: number;
-  yearGap: number;
+  bucketGap: number;
+  correctCountry: boolean;
+  guessCountry: string | null;
+  answerCountry: string | null;
   placeScore: number;
   timeScore: number;
   total: number;
@@ -62,10 +75,15 @@ type Screen = "home" | "loading" | "game" | "complete";
 
 const MET_API =
   "https://collectionapi.metmuseum.org/public/collection/v1";
-const MAP_IMAGE =
-  "https://upload.wikimedia.org/wikipedia/commons/a/ac/Earthmap1000x500.jpg";
 const ROUND_COUNT = 10;
 const MAX_ROUND_SCORE = 10_000;
+const TIME_MIN = -4000;
+const TIME_MAX = 2000;
+const TIME_BUCKET_SIZE = 250;
+const COUNTRY_FEATURES = feature(
+  countriesAtlas as never,
+  countriesAtlas.objects.countries as never,
+) as unknown as FeatureCollection<Geometry, { name?: string }>;
 const SEARCH_TERMS = [
   "mask",
   "vessel",
@@ -449,17 +467,32 @@ function resolvePlace(object: MetObject): Place | null {
   );
 }
 
+function cleanField(value?: string): string {
+  return (value || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeArtifact(object: MetObject): Artifact | null {
   const begin = Number(object.objectBeginDate);
   const end = Number(object.objectEndDate);
-  const image = object.primaryImageSmall || object.primaryImage;
+  const primaryImage = object.primaryImage || object.primaryImageSmall;
+  const images = [...new Set(
+    [primaryImage, ...(object.additionalImages || [])].filter(
+      (image): image is string => Boolean(image),
+    ),
+  )];
   const place = resolvePlace(object);
-  const title = object.title?.trim() || "";
+  const title = cleanField(object.title);
   const span = Math.abs(end - begin);
 
   if (
     !object.isPublicDomain ||
-    !image ||
+    images.length === 0 ||
     !title ||
     !place ||
     !Number.isFinite(begin) ||
@@ -475,15 +508,14 @@ function normalizeArtifact(object: MetObject): Artifact | null {
   return {
     id: object.objectID,
     title,
-    image,
-    objectName: object.objectName?.trim() || "Object",
-    medium: object.medium?.trim() || "Medium not recorded",
-    dateLabel: object.objectDate?.trim() || formatYearRange(begin, end),
+    images,
+    objectName: cleanField(object.objectName) || "Object",
+    medium: cleanField(object.medium) || "Medium not recorded",
+    dateLabel: cleanField(object.objectDate) || formatYearRange(begin, end),
     beginYear: begin,
     endYear: end,
-    year: Math.round((begin + end) / 2),
     place,
-    culture: object.culture?.trim() || object.country?.trim() || place.label,
+    culture: cleanField(object.culture) || cleanField(object.country) || place.label,
     objectURL:
       object.objectURL ||
       `https://www.metmuseum.org/art/collection/search/${object.objectID}`,
@@ -556,13 +588,50 @@ function formatNumber(value: number): string {
 
 function formatYear(year: number): string {
   if (year < 0) return `${Math.abs(year)} BCE`;
-  if (year === 0) return "1 BCE";
+  if (year === 0) return "1 CE";
   return `${year} CE`;
 }
 
 function formatYearRange(begin: number, end: number): string {
   if (begin === end) return formatYear(begin);
   return `${formatYear(begin)}–${formatYear(end)}`;
+}
+
+function bucketStartForYear(year: number): number {
+  const clamped = Math.max(TIME_MIN, Math.min(TIME_MAX + TIME_BUCKET_SIZE - 1, year));
+  return (
+    Math.floor((clamped - TIME_MIN) / TIME_BUCKET_SIZE) * TIME_BUCKET_SIZE +
+    TIME_MIN
+  );
+}
+
+function formatTimeBucket(bucketStart: number): string {
+  const bucketEnd = bucketStart + TIME_BUCKET_SIZE - 1;
+  if (bucketEnd < 0) {
+    return `${Math.abs(bucketStart)}–${Math.abs(bucketEnd)} BCE`;
+  }
+  return `${Math.max(1, bucketStart)}–${bucketEnd} CE`;
+}
+
+function answerBucketsForArtifact(artifact: Artifact): number[] {
+  const first = bucketStartForYear(artifact.beginYear);
+  const last = bucketStartForYear(artifact.endYear);
+  const buckets: number[] = [];
+  for (
+    let bucket = first;
+    bucket <= last;
+    bucket += TIME_BUCKET_SIZE
+  ) {
+    buckets.push(bucket);
+  }
+  return buckets;
+}
+
+function countryAtPoint(lon: number, lat: number): string | null {
+  const match = COUNTRY_FEATURES.features.find((country) =>
+    geoContains(country as Feature, [lon, lat]),
+  );
+  return match?.properties?.name || null;
 }
 
 function haversineDistance(a: Guess, b: Place): number {
@@ -579,29 +648,32 @@ function haversineDistance(a: Guess, b: Place): number {
 
 function scoreRound(artifact: Artifact, guess: Guess): RoundResult {
   const distanceKm = haversineDistance(guess, artifact.place);
-  const yearGap =
-    guess.year < artifact.beginYear
-      ? artifact.beginYear - guess.year
-      : guess.year > artifact.endYear
-        ? guess.year - artifact.endYear
-        : 0;
-  const placeScore = Math.round(5000 * Math.exp(-distanceKm / 3200));
-  const timeScore = Math.round(5000 * Math.exp(-yearGap / 460));
+  const guessCountry = countryAtPoint(guess.lon, guess.lat);
+  const answerCountry = countryAtPoint(artifact.place.lon, artifact.place.lat);
+  const correctCountry = Boolean(
+    guessCountry && answerCountry && guessCountry === answerCountry,
+  );
+  const bucketGap = Math.min(
+    ...answerBucketsForArtifact(artifact).map(
+      (answerBucket) =>
+        Math.abs(guess.bucketStart - answerBucket) / TIME_BUCKET_SIZE,
+    ),
+  );
+  const placeScore = correctCountry
+    ? 5000
+    : Math.round(5000 * Math.exp(-distanceKm / 10000));
+  const timeScore = Math.round(5000 * Math.exp(-bucketGap / 5.6));
   return {
     artifact,
     guess,
     distanceKm,
-    yearGap,
+    bucketGap,
+    correctCountry,
+    guessCountry,
+    answerCountry,
     placeScore,
     timeScore,
     total: Math.min(MAX_ROUND_SCORE, placeScore + timeScore),
-  };
-}
-
-function pointToPercent(lat: number, lon: number) {
-  return {
-    left: `${((lon + 180) / 360) * 100}%`,
-    top: `${((90 - lat) / 180) * 100}%`,
   };
 }
 
@@ -723,8 +795,8 @@ function HomeScreen({
             <span>2</span>
             <h2>Place</h2>
             <p>
-              Drop one pin on the world map and set the timeline to your best
-              estimate.
+              Zoom into the bordered world map, drop one pin, and choose a
+              250-year period.
             </p>
           </article>
           <article>
@@ -792,88 +864,213 @@ function WorldMap({
   revealed: boolean;
   onGuess: (guess: Pick<Guess, "lat" | "lon">) => void;
 }) {
-  const mapRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const leafletMapRef = useRef<LeafletMap | null>(null);
+  const borderLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const guessMarkerRef = useRef<CircleMarker | null>(null);
+  const answerMarkerRef = useRef<CircleMarker | null>(null);
+  const answerLineRef = useRef<Polyline | null>(null);
+  const revealedRef = useRef(revealed);
+  const onGuessRef = useRef(onGuess);
+  const [mapReady, setMapReady] = useState(false);
 
-  const handleMapClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (revealed || !mapRef.current) return;
-    const bounds = mapRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-    onGuess({
-      lon: x * 360 - 180,
-      lat: 90 - y * 180,
+  useEffect(() => {
+    revealedRef.current = revealed;
+    onGuessRef.current = onGuess;
+  }, [onGuess, revealed]);
+
+  const renderMapState = useCallback(async () => {
+    const map = leafletMapRef.current;
+    if (!map) return;
+    const L = await import("leaflet");
+
+    guessMarkerRef.current?.remove();
+    answerMarkerRef.current?.remove();
+    answerLineRef.current?.remove();
+    guessMarkerRef.current = null;
+    answerMarkerRef.current = null;
+    answerLineRef.current = null;
+
+    if (guess) {
+      guessMarkerRef.current = L.circleMarker([guess.lat, guess.lon], {
+        radius: revealed ? 6 : 8,
+        color: "#fff7e8",
+        weight: 3,
+        fillColor: "#7d2d28",
+        fillOpacity: 1,
+        className: "leaflet-guess-marker",
+      })
+        .addTo(map)
+        .bindTooltip("Your guess", {
+          direction: "top",
+          offset: [0, -7],
+          className: "map-tooltip",
+        });
+    }
+
+    if (revealed) {
+      answerMarkerRef.current = L.circleMarker([answer.lat, answer.lon], {
+        radius: 8,
+        color: "#fff7e8",
+        weight: 3,
+        fillColor: "#536b5a",
+        fillOpacity: 1,
+        className: "leaflet-answer-marker",
+      })
+        .addTo(map)
+        .bindTooltip(answer.label, {
+          permanent: true,
+          direction: "top",
+          offset: [0, -7],
+          className: "map-tooltip map-tooltip--answer",
+        });
+
+      if (guess) {
+        answerLineRef.current = L.polyline(
+          [
+            [guess.lat, guess.lon],
+            [answer.lat, answer.lon],
+          ],
+          {
+            color: "#7d2d28",
+            weight: 2,
+            dashArray: "6 7",
+            opacity: 0.75,
+          },
+        ).addTo(map);
+        map.fitBounds(
+          L.latLngBounds(
+            [guess.lat, guess.lon],
+            [answer.lat, answer.lon],
+          ).pad(0.42),
+          { animate: true, maxZoom: 5 },
+        );
+      }
+    }
+  }, [answer, guess, revealed]);
+
+  useEffect(() => {
+    if (!containerRef.current || leafletMapRef.current) return;
+    let active = true;
+
+    void import("leaflet").then((L) => {
+      if (!active || !containerRef.current) return;
+      const map = L.map(containerRef.current, {
+        center: [18, 0],
+        zoom: 2,
+        minZoom: 1.5,
+        maxZoom: 8,
+        zoomSnap: 0.25,
+        worldCopyJump: true,
+        attributionControl: true,
+      });
+      leafletMapRef.current = map;
+
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        {
+          maxZoom: 20,
+          subdomains: "abcd",
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        },
+      ).addTo(map);
+
+      borderLayerRef.current = L.geoJSON(COUNTRY_FEATURES, {
+        interactive: false,
+        style: {
+          color: "#4c514c",
+          weight: 0.75,
+          opacity: 0.62,
+          fillOpacity: 0,
+        },
+      }).addTo(map);
+
+      map.on(
+        "click",
+        (event: { latlng: { lat: number; lng: number } }) => {
+          if (revealedRef.current) return;
+          onGuessRef.current({
+            lat: event.latlng.lat,
+            lon: event.latlng.lng,
+          });
+        },
+      );
+
+      requestAnimationFrame(() => map.invalidateSize());
+      setMapReady(true);
     });
-  };
 
-  const guessPoint = guess ? pointToPercent(guess.lat, guess.lon) : null;
-  const answerPoint = pointToPercent(answer.lat, answer.lon);
+    return () => {
+      active = false;
+      borderLayerRef.current = null;
+      guessMarkerRef.current = null;
+      answerMarkerRef.current = null;
+      answerLineRef.current = null;
+      leafletMapRef.current?.remove();
+      leafletMapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    void renderMapState();
+  }, [mapReady, renderMapState]);
 
   return (
-    <div
-      className={`world-map ${revealed ? "world-map--revealed" : ""}`}
-      ref={mapRef}
-      onClick={handleMapClick}
-      role="application"
-      aria-label="World map. Click to place your guess."
-      style={{ backgroundImage: `url(${MAP_IMAGE})` }}
-    >
-      <div className="map-wash" />
-      <div className="map-grid" />
+    <div className="world-map-shell">
+      <div
+        className={`world-map ${revealed ? "world-map--revealed" : ""}`}
+        ref={containerRef}
+        role="application"
+        aria-label="Zoomable world map with country borders. Click to place your guess."
+      />
       {!guess && !revealed && (
         <div className="map-instruction">
-          <span>⌖</span> Click anywhere to place your pin
+          <span>⌖</span> Click to place · scroll or pinch to zoom
         </div>
       )}
-      {guessPoint && (
-        <div
-          className={`map-pin map-pin--guess ${revealed ? "is-small" : ""}`}
-          style={guessPoint}
-          aria-label="Your guess"
-        >
-          <span />
-        </div>
-      )}
-      {revealed && (
-        <div
-          className="map-pin map-pin--answer"
-          style={answerPoint}
-          aria-label={`Correct location: ${answer.label}`}
-        >
-          <span />
-          <b>{answer.label}</b>
-        </div>
-      )}
-      <div className="map-credit">
-        Map image: Wikimedia Commons · free use
+      <div className="map-legend" aria-hidden="true">
+        <span><i className="legend-dot legend-dot--guess" /> Guess</span>
+        {revealed && <span><i className="legend-dot legend-dot--answer" /> Answer</span>}
       </div>
     </div>
   );
 }
 
 function Timeline({
-  year,
+  bucketStart,
   truth,
   revealed,
   onChange,
 }: {
-  year: number;
+  bucketStart: number;
   truth: Artifact;
   revealed: boolean;
-  onChange: (year: number) => void;
+  onChange: (bucketStart: number) => void;
 }) {
   const ticks = [-4000, -3000, -2000, -1000, 0, 1000, 2000];
-  const position = ((year + 4000) / 6000) * 100;
-  const truthStart = ((truth.beginYear + 4000) / 6000) * 100;
-  const truthEnd = ((truth.endYear + 4000) / 6000) * 100;
+  const position = ((bucketStart - TIME_MIN) / (TIME_MAX - TIME_MIN)) * 100;
+  const answerBuckets = answerBucketsForArtifact(truth);
+  const answerBucketStart = answerBuckets[0];
+  const answerBucketEnd = answerBuckets[answerBuckets.length - 1];
+  const truthWidth =
+    ((answerBucketEnd - answerBucketStart + TIME_BUCKET_SIZE) /
+      (TIME_MAX - TIME_MIN)) *
+    100;
+  const truthStart = Math.min(
+    100 - truthWidth,
+    ((answerBucketStart - TIME_MIN) / (TIME_MAX - TIME_MIN)) * 100,
+  );
 
   return (
     <section className="timeline-panel" aria-label="Time guess">
       <div className="timeline-heading">
         <div>
-          <span className="field-label">Time estimate</span>
-          <strong>{formatYear(year)}</strong>
+          <span className="field-label">250-year block</span>
+          <strong>{formatTimeBucket(bucketStart)}</strong>
         </div>
-        <p>Drag to the year you think this object was made.</p>
+        <p>Choose the 250-year period when you think this object was made.</p>
       </div>
       <div className="timeline-track-wrap">
         {revealed && (
@@ -881,7 +1078,7 @@ function Timeline({
             className="truth-band"
             style={{
               left: `${Math.max(0, truthStart)}%`,
-              width: `${Math.max(0.8, truthEnd - truthStart)}%`,
+              width: `${truthWidth}%`,
             }}
           >
             <span>Truth</span>
@@ -895,13 +1092,13 @@ function Timeline({
         </div>
         <input
           type="range"
-          min="-4000"
-          max="2000"
-          step="50"
-          value={year}
+          min={TIME_MIN}
+          max={TIME_MAX}
+          step={TIME_BUCKET_SIZE}
+          value={bucketStart}
           onChange={(event) => onChange(Number(event.target.value))}
           disabled={revealed}
-          aria-label="Estimated year"
+          aria-label="Estimated 250-year period"
         />
         <div className="timeline-ticks" aria-hidden="true">
           {ticks.map((tick) => (
@@ -912,6 +1109,160 @@ function Timeline({
         </div>
       </div>
     </section>
+  );
+}
+
+function ArtifactImagePanel({ artifact }: { artifact: Artifact }) {
+  const [imageIndex, setImageIndex] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const imageCount = artifact.images.length;
+
+  const moveImage = useCallback(
+    (direction: number) => {
+      setImageIndex((current) => (current + direction + imageCount) % imageCount);
+      setZoom(1);
+    },
+    [imageCount],
+  );
+
+  useEffect(() => {
+    setImageIndex(0);
+    setViewerOpen(false);
+    setZoom(1);
+  }, [artifact.id]);
+
+  useEffect(() => {
+    if (!viewerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewerOpen(false);
+      if (event.key === "ArrowLeft" && imageCount > 1) moveImage(-1);
+      if (event.key === "ArrowRight" && imageCount > 1) moveImage(1);
+      if (event.key === "+" || event.key === "=") {
+        setZoom((current) => Math.min(4, current + 0.5));
+      }
+      if (event.key === "-") {
+        setZoom((current) => Math.max(1, current - 0.5));
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [imageCount, moveImage, viewerOpen]);
+
+  return (
+    <>
+      <div className="artifact-frame">
+        <button
+          className="artifact-image-button"
+          onClick={() => {
+            setZoom(1);
+            setViewerOpen(true);
+          }}
+          aria-label="Open a larger, zoomable view of this object"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={artifact.images[imageIndex]}
+            alt={`Mystery museum object${imageCount > 1 ? `, image ${imageIndex + 1} of ${imageCount}` : ""}`}
+          />
+        </button>
+        <span className="image-tag">The Met · Open Access</span>
+        <button
+          className="expand-image-button"
+          onClick={() => {
+            setZoom(1);
+            setViewerOpen(true);
+          }}
+          aria-label="Expand and zoom image"
+        >
+          <span aria-hidden="true">⛶</span> Expand
+        </button>
+        {imageCount > 1 && (
+          <div className="image-pagination" aria-label="Object images">
+            <button onClick={() => moveImage(-1)} aria-label="Previous image">
+              ←
+            </button>
+            <span>
+              {imageIndex + 1} / {imageCount}
+            </span>
+            <button onClick={() => moveImage(1)} aria-label="Next image">
+              →
+            </button>
+          </div>
+        )}
+      </div>
+
+      {viewerOpen && (
+        <div
+          className="image-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Expanded view of ${artifact.title}`}
+          onClick={(event) => {
+            if (event.currentTarget === event.target) setViewerOpen(false);
+          }}
+        >
+          <header className="image-viewer-header">
+            <div>
+              <span className="field-label">Object image</span>
+              <strong>
+                {imageCount > 1 ? `${imageIndex + 1} of ${imageCount}` : "Expanded view"}
+              </strong>
+            </div>
+            <div className="image-zoom-controls" aria-label="Image zoom controls">
+              <button
+                onClick={() => setZoom((current) => Math.max(1, current - 0.5))}
+                disabled={zoom <= 1}
+                aria-label="Zoom out"
+              >
+                −
+              </button>
+              <button onClick={() => setZoom(1)} aria-label="Reset zoom">
+                {zoom.toFixed(1)}×
+              </button>
+              <button
+                onClick={() => setZoom((current) => Math.min(4, current + 0.5))}
+                disabled={zoom >= 4}
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              <button
+                className="viewer-close"
+                onClick={() => setViewerOpen(false)}
+                aria-label="Close expanded image"
+              >
+                ×
+              </button>
+            </div>
+          </header>
+          <div className="image-viewer-canvas">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={artifact.images[imageIndex]}
+              alt="Expanded museum object"
+              style={{ transform: `scale(${zoom})` }}
+            />
+          </div>
+          {imageCount > 1 && (
+            <div className="viewer-image-nav">
+              <button onClick={() => moveImage(-1)}>← Previous image</button>
+              <div className="viewer-dots" aria-hidden="true">
+                {artifact.images.map((_, index) => (
+                  <i key={index} className={index === imageIndex ? "is-active" : ""} />
+                ))}
+              </div>
+              <button onClick={() => moveImage(1)}>Next image →</button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -929,7 +1280,7 @@ function ResultPanel({
       <p className="eyebrow">Object identified</p>
       <h2>{result.artifact.title}</h2>
       <p className="result-culture">
-        {result.artifact.culture} · {result.artifact.dateLabel}
+        <em>{result.artifact.culture}</em> · {result.artifact.dateLabel}
       </p>
       <dl className="object-facts">
         <div>
@@ -944,12 +1295,20 @@ function ResultPanel({
       <div className="score-breakdown">
         <div>
           <span>Place</span>
-          <strong>{formatNumber(result.distanceKm)} km</strong>
+          <strong>
+            {result.correctCountry
+              ? `Correct country · ${result.answerCountry}`
+              : `${formatNumber(result.distanceKm)} km`}
+          </strong>
           <b>+{formatNumber(result.placeScore)}</b>
         </div>
         <div>
           <span>Time</span>
-          <strong>{formatNumber(result.yearGap)} yrs</strong>
+          <strong>
+            {result.bucketGap === 0
+              ? "Correct 250-year block"
+              : `${formatNumber(result.bucketGap)} ${result.bucketGap === 1 ? "block" : "blocks"} away`}
+          </strong>
           <b>+{formatNumber(result.timeScore)}</b>
         </div>
         <div className="round-total">
@@ -994,14 +1353,14 @@ function GameScreen({
   const artifact = artifacts[round];
   const result = results[round] || null;
   const [pin, setPin] = useState<Pick<Guess, "lat" | "lon"> | null>(null);
-  const [year, setYear] = useState(500);
+  const [bucketStart, setBucketStart] = useState(500);
 
   useEffect(() => {
     setPin(null);
-    setYear(500);
+    setBucketStart(500);
   }, [round]);
 
-  const guess = pin ? { ...pin, year } : null;
+  const guess = pin ? { ...pin, bucketStart } : null;
   const submit = () => {
     if (!guess || result) return;
     onCompleteRound(scoreRound(artifact, guess));
@@ -1042,11 +1401,7 @@ function GameScreen({
 
       <div className="game-stage">
         <section className="artifact-panel">
-          <div className="artifact-frame">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={artifact.image} alt="Mystery museum object" />
-            <span className="image-tag">The Met · Open Access</span>
-          </div>
+          <ArtifactImagePanel key={artifact.id} artifact={artifact} />
           {!result ? (
             <div className="clue-card">
               <span className="field-label">Material clue</span>
@@ -1075,21 +1430,22 @@ function GameScreen({
             </div>
             {!result && (
               <p className="guess-help">
-                Place a pin on the map, then choose a year below.
+                Place a pin on the map, then choose a 250-year block below.
               </p>
             )}
           </div>
           <WorldMap
+            key={artifact.id}
             guess={result?.guess || guess}
             answer={artifact.place}
             revealed={Boolean(result)}
             onGuess={(nextPin) => setPin(nextPin)}
           />
           <Timeline
-            year={result?.guess.year ?? year}
+            bucketStart={result?.guess.bucketStart ?? bucketStart}
             truth={artifact}
             revealed={Boolean(result)}
-            onChange={setYear}
+            onChange={setBucketStart}
           />
           {!result && (
             <div className="submit-row">
@@ -1187,7 +1543,7 @@ function CompleteScreen({
           <article key={result.artifact.id}>
             <span>{String(index + 1).padStart(2, "0")}</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={result.artifact.image} alt="" />
+            <img src={result.artifact.images[0]} alt="" />
             <div>
               <strong>{result.artifact.title}</strong>
               <small>
